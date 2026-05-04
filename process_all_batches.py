@@ -225,7 +225,9 @@ def main() -> None:
     """
     Main entry point for batch processing.
     """
-    batch_files = sorted(list(SIRET_BATCHES_DIR.glob("siret_batch_*.txt")))
+    batch_files = sorted(
+        list(SIRET_BATCHES_DIR.glob("siret_batch_*.txt")), reverse=True
+    )
 
     if not batch_files:
         logger.error(f"No batches found in {SIRET_BATCHES_DIR}")
