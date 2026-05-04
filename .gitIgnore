@@ -1,0 +1,6 @@
+DATA
+pappers_api
+__pycache__/
+*.checkpoint
+.env
+*.log

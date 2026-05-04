@@ -1,0 +1,90 @@
+name: Scrape Entreprises API
+
+concurrency:
+  group: scraping-pipeline
+  cancel-in-progress: false
+
+on:
+  schedule:
+    - cron: '0 */8 * * *'
+  workflow_dispatch:
+
+jobs:
+  scrape_and_push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas pyarrow requests
+
+      - name: Run Scraper
+        run: python process_all_batches.py
+
+      - name: Commit and Push Results
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add -A data_api/
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          
+          git commit -m "chore: update api results and checkpoints $(date +'%Y-%m-%d %H:%M')"
+          
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          SUCCESS=false
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            git fetch origin main
+            
+            # Rebase onto the latest main, favoring our local commit's changes (-X theirs)
+            if git rebase origin/main -X theirs; then
+              if git push origin main; then
+                SUCCESS=true
+                break
+              fi
+            else
+              echo "Rebase conflict detected. Resolving in favor of local changes..."
+              
+              # Resolve binary or add/add conflicts by keeping our local version ('theirs' in rebase)
+              git checkout --theirs data_api/ || true
+              git add data_api/ || true
+              
+              # Continue the rebase
+              GIT_EDITOR=true git rebase --continue || git rebase --abort
+              
+              # Try to push the resolved changes
+              if git push origin main; then
+                SUCCESS=true
+                break
+              fi
+            fi
+            
+            echo "Push failed or rebase aborted, retrying in 10 seconds..."
+            sleep 10
+            RETRY_COUNT=$((RETRY_COUNT+1))
+          done
+          
+          if [ "$SUCCESS" = false ]; then
+            echo "Failed to push after $MAX_RETRIES attempts."
+            exit 1
+          fi
